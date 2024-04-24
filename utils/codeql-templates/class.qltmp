@@ -1,0 +1,12 @@
+$imports
+
+class $name$extends$extensions {
+    $vars
+
+    $name() {
+        $definition
+    }
+
+    $predicates
+
+}

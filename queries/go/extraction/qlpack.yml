@@ -1,0 +1,4 @@
+name: cellcrypt/goqueries
+dependencies:
+  codeql/go-all: "*"
+extractor: go

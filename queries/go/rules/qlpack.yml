@@ -1,0 +1,5 @@
+name: cellcrypt/gocryptorules
+dependencies:
+  cellcrypt/goqueries: "*"
+  cellular/go-cores: "*"
+extractor: go

@@ -1,0 +1,27 @@
+class $name extends TaintTracking::Configuration {
+    $name() { this = "$name" }
+
+    override predicate isSource(DataFlow::Node node) {
+        $src_code
+    }
+    override predicate isSink(DataFlow::Node node) {
+        $snk_code
+    }
+
+    override predicate isAdditionalTaintStep(DataFlow::Node fromNode, DataFlow::Node toNode) {
+        any(DataFlow::Write w).writesComponent(toNode.(DataFlow::PostUpdateNode).getPreUpdateNode(), fromNode)
+        or
+        (
+            fromNode.asExpr().getParent() = toNode.asExpr()
+            and exists(DataFlow::Write w | w.getRhs().asExpr() = toNode.asExpr())
+            and fromNode.asExpr().toString() = "index expression"
+        )
+        or
+        (
+            toNode instanceof DataFlow::BinaryOperationNode
+            and toNode.(DataFlow::BinaryOperationNode).getRightOperand() = fromNode
+            and fromNode.asExpr().toString() = "index expression"
+        )
+    }
+    override int fieldFlowBranchLimit() { result = 5000 }
+}

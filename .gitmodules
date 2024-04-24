@@ -1,0 +1,3 @@
+[submodule "codeql-home/codeql-library"]
+	path = codeql-home/codeql-library
+	url = git@github.com:github/codeql

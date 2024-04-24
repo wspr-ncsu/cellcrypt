@@ -1,0 +1,91 @@
+################################################################
+# Builder Image (can also be used for development)
+################################################################
+#From ubuntu:jammy as nextepc-s1ap-aper-builder
+# See TODO below
+
+From ubuntu:focal as nextepc-s1ap-aper-fuzz
+
+USER root
+
+ENV NEXTEPC_ROOT=/nextepc
+ENV BUILD_DIR=/build
+ENV TZ=Europe/Paris
+ENV DEBIAN_FRONTEND=noninteractive
+ENV DATABASE=/database
+
+ADD nextepc/ $NEXTEPC_ROOT
+RUN mkdir -p $DATABASE
+VOLUME ["databases/"]
+
+RUN mkdir -p $BUILD_DIR
+
+#RUN echo "Installing MongoDB" && \
+#    apt-get update && \
+#    apt-get install -y mongodb && \
+#    service start mongodb
+
+RUN echo "Installing apt dependencies" && \
+    apt-get update && \
+    apt-get install -y \
+    libmongoc-dev \
+    autoconf libtool gcc g++ pkg-config make \
+    git flex bison libsctp-dev libgnutls28-dev libgcrypt20-dev \
+    libssl-dev libidn11-dev libbson-dev libyaml-dev \
+    vim tcpdump valgrind gdb curl tmux coreutils socat \
+    mongodb iproute2 wget tar
+# Install CodeQL
+ENV CODEQL=/codeql
+ENV PATH=$PATH:$CODEQL/codeql/
+ADD codeql/ $CODEQL
+
+RUN cd $NEXTEPC_ROOT && \
+    autoreconf -iv && \
+    ./configure --prefix=$BUILD_DIR && \
+    codeql database create --db-cluster --language=cpp,javascript --overwrite --command="make -j `nproc`" $DATABASE/nextepc_db 
+
+
+ENTRYPOINT /bin/bash
+# from scratch as export-stage
+# Build nextEPC binaries
+
+# COPY --from=nextepc-s1ap-aper-fuzz $DATABASE/nextepc_db/ .
+
+
+# Build coverage binaries
+# RUN cd $NEXTEPC_ROOT && \
+    # autoreconf -iv && \
+    # ./configure CFLAGS='--coverage' LDFLAGS='-lgcov --coverage' LFLAGS='-lgcov --coverage' --prefix=/build-cov && \
+    # make -j `nproc` && \
+    # make install
+
+
+# Create directory of seeds used for fuzzing and populate it
+# RUN bash $NEXTEPC_ROOT/fuzzing_configs.sh && \
+#     mkdir /fuzz-seeds && \
+#     echo 'ABEALQAABAA7AAgAAPEQAAAZsAA8QAoDgHNyc2VuYjAxAEAABwAAAcAA8RAAiUABQA==' | base64 -d > /fuzz-seeds/2.testcase && \
+#     echo 'AAxAXwAABgAIAAIAAQAaAC0sF2u/S1EXB0EBC/YA8RAAAgHyAEZTB+BgAAAAABAABQIB0BHRkeBvBOAAYAAAQwAGAADxEAAHAGRACAAA8RAAGbAQAIZAAUAAYAAGAEDyAEZT' | base64 -d > /fuzz-seeds/3.testcase && \
+#     echo 'AA1APgAABQAAAAIAEQAIAAIAAQAaABUUJxO0PzEYAgHaKAkIaW50ZXJuZXQAZEAIAADxEAAZsBAAQ0AGAADxEAAH' | base64 -d > /fuzz-seeds/4.testcase && \
+#     echo 'ABZAPwAAAwAAAAIAEQAIAAIAAQBKQCwrAUgBAm3YAAAYAA8wIIAAAQAKBACiAEJQAMAKoABACKSAABAAAIJQUABN' | base64 -d > /fuzz-seeds/5.testcase && \
+#     echo 'IAkAIgAAAwAAQAIAEQAIQAIAAQAzQA8AADJACgofwKh6EgAAAAE=' | base64 -d > /fuzz-seeds/6.testcase && \
+#     echo 'AA1ANwAABQAAAAIAEQAIAAIAAQAaAA4NJycCh40ZB0MAA1IAwgBkQAgAAPEQABmwEABDQAYAAPEQAAc=' | base64 -d > /fuzz-seeds/7.testcase && \
+#     echo 'ABJAFQAAAwAAAAIAEQAIAAIAAQACQAICgA==' | base64 -d > /fuzz-seeds/8.testcase && \
+#     echo 'IBcADwAAAgAAQAIAEQAIQAIAAQ==' | base64 -d > /fuzz-seeds/9.testcase && \
+#     echo 'AAxANwAABgAIAAIAAgAaAAUExxrKiQBDAAYAAPEQAAcAZEAIAADxEAAZsBAAhkABQABgAAYAQPIARlM=' | base64 -d > /fuzz-seeds/10.testcase && \
+#     echo 'ABZAPwAAAwAAAAIAEgAIAAIAAgBKQCwrAUgBAm3YAAAYAA8wIIAAAQAKBACiAEJQAMAKoABACKSAABAAAIJQUABNAA==' | base64 -d > /fuzz-seeds/11.testcase && \
+#     echo 'IAkAIgAAAwAAQAIAEgAIQAIAAgAzQA8AADJACgofwKh6EgAAAAI=' | base64 -d > /fuzz-seeds/12.testcase && \
+#     echo 'AA1APwAABQAAAAIAEgAIAAIAAgAaABYVFx9zcd8bB0UJC/YA8RAAAgHyAEZTAGRACAAA8RAAGbAQAENABgAA8RAABw==' | base64 -d > /fuzz-seeds/13.testcase && \
+#     echo 'IBcADwAAAgAAQAIAEgAIQAIAAg==' | base64 -d > /fuzz-seeds/14.testcase
+
+# COPY generated-s1a-seeds/ /fuzz-seeds/
+
+# RUN mkdir /data && mkdir /data/db && nohup mongod >/data/mongod.log 2>&1 &
+
+# TODO: in the future, maybe separate build & target image.
+# For now, we'll leave them be together
+################################################################
+# Target Image
+################################################################
+#from ubuntu:jammy as nextepc-s1ap-aper-fuzz
+#
+#ENV NEXTEPC_ROOT=/nextepc

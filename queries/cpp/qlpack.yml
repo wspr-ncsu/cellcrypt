@@ -1,0 +1,7 @@
+name: cellcrypt/cppqueries
+dependencies:
+  codeql/cpp-all: "*"
+  codeql/cpp-queries: "*"
+  cellular/oai: "*"
+  cellular/open5gs: "*"
+extractor: cpp

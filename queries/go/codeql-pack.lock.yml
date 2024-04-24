@@ -1,0 +1,10 @@
+---
+lockVersion: 1.0.0
+dependencies:
+  codeql/go-all:
+    version: 0.5.1
+  codeql/tutorial:
+    version: 0.0.9
+  codeql/util:
+    version: 0.0.9
+compiled: false

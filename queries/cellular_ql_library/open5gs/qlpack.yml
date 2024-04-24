@@ -1,0 +1,4 @@
+name: cellular/open5gs
+dependencies:
+  cellular/cpp-open5gs: "*"
+

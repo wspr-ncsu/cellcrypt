@@ -1,0 +1,381 @@
+#/*
+# * Licensed to the OpenAirInterface (OAI) Software Alliance under one or more
+# * contributor license agreements.  See the NOTICE file distributed with
+# * this work for additional information regarding copyright ownership.
+# * The OpenAirInterface Software Alliance licenses this file to You under
+# * the terms found in the LICENSE file in the root of this source tree.
+# *
+# * Unless required by applicable law or agreed to in writing, software
+# * distributed under the License is distributed on an "AS IS" BASIS,
+# * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# * See the License for the specific language governing permissions and
+# * limitations under the License.
+# *-------------------------------------------------------------------------------
+# * For more information about the OpenAirInterface (OAI) Software Alliance:
+# *      contact@openairinterface.org
+# */
+#---------------------------------------------------------------------
+#
+# Dockerfile for the Open-Air-Interface HSS service
+#   Valid for Ubuntu-18.04 (bionic)
+#
+#---------------------------------------------------------------------
+
+#---------------------------------------------------------------------
+# BUILDER IMAGE - oai-hss
+#---------------------------------------------------------------------
+FROM ubuntu:bionic as oai-hss-builder
+
+ARG EURECOM_PROXY
+ENV MAGMA_ROOT=/magma
+ENV BUILD_TYPE=RelWithDebInfo
+ENV C_BUILD=/build/c
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Europe
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get upgrade --yes && \
+    DEBIAN_FRONTEND=noninteractive apt-get install --yes \
+      psmisc \
+      software-properties-common \
+      sudo \
+      dpkg \
+      apt-utils \   
+      git && \
+    rm -rf /var/lib/apt/lists/*
+
+ENV HSS=/oai-hss
+ENV SPGWC=/oai-spgwc
+ENV SPGWU=/oai-spgwu-tiny
+
+# Some GIT configuration command quite useful
+RUN /bin/bash -c "if [[ -v EURECOM_PROXY ]]; then git config --global http.proxy $EURECOM_PROXY; fi" && \
+    git config --global https.postBuffer 123289600 && \
+    git config --global http.sslverify false
+
+# wait for it
+workdir /
+RUN git clone https://github.com/vishnubob/wait-for-it.git
+
+# Copy the workspace as is
+
+COPY openair-epc-fed/component/oai-hss/ $HSS
+COPY openair-epc-fed/component/oai-spgwc/ $SPGWC
+COPY openair-epc-fed/component/oai-spgwu-tiny/ $SPGWU
+COPY openair-epc-fed/component/magma/ $MAGMA_ROOT
+# Add Converged MME sources to the container
+WORKDIR /patches
+COPY  openair-epc-fed/component/magma/lte/gateway/c/core/oai/patches/0001-opencoord.org.freeDiameter.patch /patches
+COPY  openair-epc-fed/component/magma/lte/gateway/c/core/oai/patches/0002-opencoord.org.freeDiameter.patch /patches
+
+# Installing Deps
+WORKDIR $HSS/scripts
+RUN $HSS/scripts/build_hss_rel14 --check-installed-software --force
+WORKDIR $SPGWC/scripts
+RUN $SPGWC/build/scripts/build_spgwc --install-min-deps --force
+WORKDIR $SPGWU/scripts
+RUN $SPGWU/build/scripts/build_spgwu --install-min-deps --force
+
+RUN mkdir -p $C_BUILD
+
+RUN [ "/bin/bash", "-c", "echo \"Install general purpose packages\" && \
+    apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get upgrade -y && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -fy gnupg wget software-properties-common autoconf automake \
+    libtool curl make g++ unzip git build-essential autoconf libtool pkg-config libsqlite3-dev libsqlite3-0 \
+    gcc-7 g++-7 apt-transport-https ca-certificates apt-utils vim redis-server tzdata \
+    libssl-dev ninja-build golang python2.7 automake perl libgmp3-dev clang-format-7 && \
+    echo \"Configure C/C++ compiler v7.5 as primary\" && \
+    update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-7 20 && \
+    update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-7 20 && \
+    echo \"Add required package repository for CMake\" && \
+    wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | apt-key add - && \
+    apt-add-repository 'deb https://apt.kitware.com/ubuntu/ bionic main' && \
+    ln -s /usr/bin/clang-format-7 /usr/bin/clang-format" ]
+
+RUN echo "Install 3rd party dependencies" && \
+    apt-get update && \
+    echo "Install CMake" && \
+    apt-get -y install cmake && \
+    echo "Install FMT lib requirements" && \
+    apt-get -y install libunwind8-dev libelf-dev libdwarf-dev bzip2 && \
+    echo "Install FreeDiameter requirements" && \
+    apt-get -y install libsctp1 libsctp-dev libgcrypt-dev \
+    bison flex libidn11-dev && \
+    echo "Install libgtpnl requirements" && \
+    apt-get -y install libmnl-dev && \
+    echo "Install Nettle requirements" && \
+    apt-get install -y libgoogle-glog-dev libconfig-dev libxml2-dev \
+    libyaml-cpp-dev nlohmann-json-dev && \
+    echo "Install Prometheus requirements" && \
+    wget --quiet https://dl.influxdata.com/telegraf/releases/telegraf_1.18.2-1_amd64.deb && \
+    dpkg -i telegraf_1.18.2-1_amd64.deb && \
+    echo "Install ZeroMQ" && \
+    apt-get install -y libczmq-dev=4.1.0-2 && \
+    echo "Install libtins" && \
+    apt-get install -y libtins-dev && \
+    echo "Install libsystemd-dev" && \
+    apt-get install -y libsystemd-dev && \
+    ln -s /usr/bin/python2.7 /usr/local/bin/python
+
+RUN apt-get install -y python3-pip && \
+    pip3 install jinja2-cli
+
+
+
+# All works will be done from the root of the file system
+WORKDIR /
+
+# git clone may fail on our OC cluster (could not resolve github.com, other sites
+# may happen), we may have to tweak some limits...
+# Prefer to fail as soon as possible if it has to happen
+RUN  git clone --recurse-submodules -b v1.15.0 https://github.com/grpc/grpc && \
+     git clone https://github.com/jupp0r/prometheus-cpp.git && \
+     git clone https://github.com/cpp-redis/cpp_redis.git && \
+     wget https://ftp.gnu.org/gnu/nettle/nettle-2.5.tar.gz && \
+     wget https://www.gnupg.org/ftp/gcrypt/gnutls/v3.1/gnutls-3.1.23.tar.xz && \
+     git clone https://liblfds.org/git/liblfds && \
+     git clone https://gitea.osmocom.org/cellular-infrastructure/libgtpnl && \
+     git clone https://github.com/OPENAIRINTERFACE/asn1c.git && \
+     git clone https://github.com/OPENAIRINTERFACE/opencord.org.freeDiameter.git freediameter && \
+     git clone https://github.com/nlohmann/json.git
+
+##### GRPC and its dependencies
+RUN echo "GRPC and its dependencies" && \
+    # Moved git clone --recurse-submodules -b v1.15.0 https://github.com/grpc/grpc && \
+    echo "Install c-ares" && \
+    cd /grpc && \
+    cd third_party/cares/cares && \
+    git fetch origin && \
+    git checkout cares-1_13_0 && \
+    mkdir -p _build && \
+    cd _build && \
+    cmake -Wno-dev -DCMAKE_BUILD_TYPE=Release .. && \
+    make -j`nproc` && \
+    make install && \
+    cd /grpc && \
+    rm -rf third_party/cares/cares/_build && \
+    echo "Install zlib" && \
+    cd third_party/zlib && \
+    mkdir -p _build && \
+    cd _build && \
+    cmake -DCMAKE_BUILD_TYPE=Release .. && \
+    make -j`nproc` && \
+    make install && \
+    cd /grpc && \
+    rm -rf third_party/zlib/_build && \
+    echo "Install protobuf" && \
+    cd third_party/protobuf && \
+    git submodule update --init --recursive  && \
+    ./autogen.sh  && \
+    ./configure  && \
+    make -j`nproc` && \
+    make install && \
+    git clean -x -d -ff -q && \
+    cd /grpc && \
+    ldconfig && \
+    echo "Install GRPC" && \
+    mkdir -p _build && \
+    cd _build && \
+    cmake \
+        -DgRPC_INSTALL=ON \
+        -DBUILD_SHARED_LIBS=ON \
+        -DgRPC_BUILD_TESTS=OFF \
+        -DgRPC_PROTOBUF_PROVIDER=package \
+        -DgRPC_ZLIB_PROVIDER=package \
+        -DgRPC_CARES_PROVIDER=package \
+        -DgRPC_SSL_PROVIDER=package \
+        -DCMAKE_BUILD_TYPE=Release \
+        .. && \
+    make -j`nproc` && \
+    make install && \
+    cd .. && rm -R --interactive=never _build
+
+
+##### Prometheus CPP
+RUN cd prometheus-cpp && \
+    # Moved git clone https://github.com/jupp0r/prometheus-cpp.git && \
+    git checkout d8326b2bba945a435f299e7526c403d7a1f68c1f && \
+    git submodule init && git submodule update && \
+    mkdir _build && \
+    cd _build/ && \
+    cmake .. && \
+    make -j`nproc` && \
+    make install && \
+    cd .. && rm -R --interactive=never _build
+
+##### Redis CPP
+RUN cd cpp_redis && \
+    # Moved git clone https://github.com/cpp-redis/cpp_redis.git && \
+    git checkout bbe38a7f83de943ffcc90271092d689ae02b3489 && \
+    git submodule init && git submodule update && \
+    mkdir _build && cd _build && \
+    cmake .. -DCMAKE_BUILD_TYPE=Release && \
+    make -j`nproc` && \
+    make install && \
+    cd .. && rm -R --interactive=never _build
+
+##### NETTLE / gnutls
+RUN tar -xf nettle-2.5.tar.gz && \
+    # Moved wget https://ftp.gnu.org/gnu/nettle/nettle-2.5.tar.gz && \
+    cd nettle-2.5 && \
+    mkdir _build && \
+    cd _build/ && \
+    ../configure --disable-openssl --enable-shared --libdir=/usr/lib && \
+    make -j`nproc` && \
+    make install && \
+    ldconfig -v && \
+    cd / && \
+    rm -R --interactive=never nettle-2.5.tar.gz nettle-2.5/_build && \
+    # Moved wget https://www.gnupg.org/ftp/gcrypt/gnutls/v3.1/gnutls-3.1.23.tar.xz && \
+    tar xf gnutls-3.1.23.tar.xz && \
+    cd gnutls-3.1.23 && \
+    ./configure --with-libnettle-prefix=/usr --prefix=/usr && \
+    make -j`nproc` && \
+    make install && \
+    make clean 2>&1 > /dev/null && \
+    cd / && \
+    rm -R --interactive=never gnutls-3.1.23.tar.xz && \
+    ldconfig -v
+
+##### liblfds
+# https://www.liblfds.org/mediawiki/index.php?title=r7.1.0:Building_Guide_(liblfds)
+RUN cd /liblfds/liblfds/liblfds7.1.0/liblfds710/build/gcc_gnumake/ && \
+    make -j`nproc` && \
+    make ar_install && \
+    make clean
+
+##### libgtpnl
+# review https://github.com/OPENAIRINTERFACE/openair-cn/blob/master/build/tools/build_helper.gtpnl
+RUN cd libgtpnl && \
+    # Moved git clone https://git.osmocom.org/libgtpnl && \
+    git reset --hard 345d687 && \
+    autoreconf -fi && \
+    ./configure && \
+    make -j`nproc` && \
+    make install && \
+    make clean 2>&1 > /dev/null && \
+    ldconfig
+
+#####  asn1c
+RUN cd asn1c && \
+    # Moved git clone https://github.com/OPENAIRINTERFACE/asn1c.git && \
+    git checkout f12568d617dbf48497588f8e227d70388fa217c9 && \
+    autoreconf -iv && \
+    ./configure && \
+    make -j`nproc` && \
+    make install && \
+    git clean -x -d -ff -q
+
+##### FreeDiameter
+RUN cd freediameter && \
+    # Moved git clone https://github.com/OPENAIRINTERFACE/opencord.org.freeDiameter.git freediameter && \
+    git pull origin master && \
+    git log -n1 && \
+    echo "Patching dict_S6as6d" && \
+    patch -p1 < /patches/0001-opencoord.org.freeDiameter.patch && \
+    patch -p1 < /patches/0002-opencoord.org.freeDiameter.patch && \
+    mkdir _build && \
+    cd _build && \
+    cmake -DBUILD_TESTING=false ../ && \
+    grep DISABLE_SCTP CMakeCache.txt && \
+    awk '{if (/^DISABLE_SCTP/) gsub(/OFF/, "ON"); print}' CMakeCache.txt > tmp && mv tmp CMakeCache.txt && \
+    grep DISABLE_SCTP CMakeCache.txt && \
+    make -j`nproc` && \
+    make install && \
+    cd ../ && rm -R --interactive=never _build && \
+    ldconfig --verbose
+
+# Install bazel
+WORKDIR /usr/sbin
+RUN wget --progress=dot:giga https://github.com/bazelbuild/bazelisk/releases/download/v1.10.0/bazelisk-linux-amd64 && \
+    chmod +x bazelisk-linux-amd64 && \
+    ln -sf /usr/sbin/bazelisk-linux-amd64 /usr/sbin/bazel
+
+RUN chmod 777 $HSS/scripts/build_hss_rel14
+RUN chmod 777 $SPGWC/build/scripts/build_spgwc
+RUN chmod 777 $SPGWU/build/scripts/build_spgwu
+
+# Install CodeQL
+ENV CODEQL=/codeql
+ENV PATH=$PATH:$CODEQL/codeql/
+ADD codeql/ $CODEQL
+
+WORKDIR /
+COPY openair-epc-fed/build_all.sh .
+RUN chmod 777 build_all.sh
+RUN codeql database create --db-cluster --language=cpp,go --overwrite --command="./build_all.sh" oai4g_db
+
+
+# RUN ./build_hss_rel14 --clean --build-type Release && \
+#     mv /openair-hss/build/hss_rel14/bin/hss /openair-hss/build/hss_rel14/bin/oai_hss
+
+#---------------------------------------------------------------------
+# TARGET IMAGE
+#---------------------------------------------------------------------
+# FROM ubuntu:bionic as oai-hss
+# ENV DEBIAN_FRONTEND=noninteractive
+# ENV TZ=Europe/Paris
+# # We install some debug tools for the moment in addition of mandatory libraries
+# RUN apt-get update && \
+#     DEBIAN_FRONTEND=noninteractive apt-get upgrade --yes && \
+#     DEBIAN_FRONTEND=noninteractive apt-get install --yes \
+#       tzdata \
+#       psmisc \
+#       openssl \
+#       net-tools \
+#       tshark \
+#       libsctp1 \
+#       libuv1 \
+#       libconfig9 \
+#       libidn11 \
+#       python \
+#       python3 \
+#       python-cassandra \
+#       python3-cassandra && \
+#     rm -rf /var/lib/apt/lists/*
+
+# # Copying executable and generated libraries
+# WORKDIR /openair-hss/bin
+# COPY --from=oai-hss-builder \
+#     /openair-hss/build/hss_rel14/bin/oai_hss \
+#     /openair-hss/scripts/entrypoint.sh \
+#     ./
+
+# COPY --from=oai-hss-builder \
+#     /usr/local/lib/libfd* \
+#     /usr/local/lib/x86_64-linux-gnu/libcassandra* \
+#     /usr/local/lib/
+# COPY --from=oai-hss-builder /usr/local/lib/freeDiameter/* /usr/local/lib/freeDiameter/
+
+# # Copying template configuration files
+# # The configuration folder will be flat
+# WORKDIR /openair-hss/etc
+# COPY --from=oai-hss-builder \
+#     /openair-hss/etc/hss_rel14.conf \
+#     /openair-hss/etc/hss_rel14.json \
+#     /openair-hss/etc/acl.conf \
+#     /openair-hss/etc/oss.json \
+#     /openair-hss/etc/hss_rel14_fd.conf \
+#     ./
+# RUN sed -i -e 's#freeDiameter##' hss_rel14.json && \
+#     sed -i -e "s#@PREFIX@/freeDiameter#@PREFIX@#g" hss_rel14_fd.conf
+
+# # Copy the certificate generation script
+# WORKDIR /openair-hss/scripts
+# COPY --from=oai-hss-builder \
+#     /openair-hss/src/hss_rel14/bin/make_certs.sh \
+#     /openair-hss/scripts/data_provisioning_users \
+#     /openair-hss/scripts/data_provisioning_mme \
+#     /wait-for-it/wait-for-it.sh \
+#     ./
+# RUN sed -i -e "s@/freeDiameter@@" make_certs.sh
+
+# WORKDIR /openair-hss
+# RUN openssl rand -out /root/.rnd 128
+
+# # expose ports configured in hss_fd.conf
+# EXPOSE 9042/tcp 5868/tcp 9080/tcp 9081/tcp
+
+# CMD ["/openair-hss/bin/oai_hss", "-j", "/openair-hss/etc/hss_rel14.json", "--reloadkey", "true"]
+# ENTRYPOINT ["/openair-hss/bin/entrypoint.sh"]

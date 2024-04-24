@@ -1,0 +1,5 @@
+name: cellular/go-cores
+dependencies:
+  cellular/go-free5gc: "*"
+  # cellular/cpp-open5gs: "*"
+

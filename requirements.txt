@@ -1,0 +1,5 @@
+dataclass_csv==1.4.0
+matplotlib==3.7.2
+pandas==2.0.3
+psutil==5.9.4
+PyYAML==6.0.1

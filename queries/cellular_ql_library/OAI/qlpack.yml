@@ -1,0 +1,4 @@
+name: cellular/oai
+dependencies:
+  cellular/cpp-oai: "*"
+

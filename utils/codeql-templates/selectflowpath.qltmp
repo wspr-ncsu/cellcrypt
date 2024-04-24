@@ -1,0 +1,3 @@
+from $cfgname cfg, DataFlow::PathNode src, DataFlow::PathNode snk
+where cfg.hasFlowPath(src, snk)
+select $select

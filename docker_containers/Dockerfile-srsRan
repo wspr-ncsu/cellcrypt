@@ -1,0 +1,100 @@
+################################################################
+# Builder Image (can also be used for development)
+################################################################
+#From ubuntu:jammy as nextepc-s1ap-aper-builder
+# See TODO below
+
+From ubuntu:focal as nextepc-s1ap-aper-fuzz
+
+ENV SRSRAN_ROOT=/srsran
+ENV BUILD_DIR=/build
+ENV TZ=Europe/Paris
+ENV DEBIAN_FRONTEND=noninteractive
+
+
+ENV CODEQL=/codeql
+ENV PATH=$PATH:$CODEQL/codeql/
+ADD codeql/ $CODEQL
+
+ADD srsRAN/ $SRSRAN_ROOT
+
+RUN apt update && \
+    apt install -y \
+        build-essential \
+        cmake libfftw3-dev \
+        libmbedtls-dev \
+        libboost-program-options-dev \
+        libconfig++-dev \
+        libsctp-dev \
+        curl \
+        iputils-ping \
+        iproute2 \
+        iptables \
+        unzip \
+        git \
+        strace \
+        lcov \
+        vim \
+        tcpdump \
+        valgrind \
+        tmux
+
+##### AFLPlusPlus
+# RUN apt-get install -y python3-dev libglib2.0-dev libpixman-1-dev \
+#     python3-setuptools cargo libgtk-3-dev && \
+#     apt-get install -y lld llvm llvm-dev clang && \
+#     apt-get install -y gcc-$(gcc --version|head -n1|sed 's/\..*//'|sed 's/.* //')-plugin-dev \
+#     libstdc++-$(gcc --version|head -n1|sed 's/\..*//'|sed 's/.* //')-dev && \
+#     git clone https://github.com/AFLplusplus/AFLplusplus && \
+#     cd AFLplusplus && \
+#     git checkout 4.04c && \
+#     make source-only && \
+#     make install
+
+# RUN git clone https://github.com/vanhauser-thc/afl-cov
+
+# ENV CC=afl-gcc-fast
+# ENV CXX=afl-g++-fast
+
+# COPY ./ $SRSRAN_ROOT
+
+# Build srsRAN binaries
+WORKDIR /build
+
+RUN cmake -j$(nproc) $SRSRAN_ROOT
+RUN codeql database create --overwrite --language=cpp --command="make -j `nproc`" srsran_db
+# RUN make -j$(nproc) install
+# RUN srsran_install_configs.sh service
+
+# Build srsRAN cov binaries
+WORKDIR /build-cov
+
+# RUN CXXFLAGS='--coverage' CFLAGS='--coverage' LDFLAGS='-lgcov --coverage' LFLAGS='-lgcov --coverage' cmake -j$(nproc) $SRSRAN_ROOT
+# RUN make -j$(nproc)
+# RUN make -j$(nproc) install
+# RUN srsran_install_configs.sh service
+
+# Update dynamic linker
+# RUN ldconfig
+
+# # Create directory of seeds used for fuzzing and populate it
+# RUN bash /srsran/fuzzing_configs.sh && \
+#     mkdir /fuzz-seeds && \
+#     echo 'ABEALQAABAA7AAgAAPEQAAAZsAA8QAoDgHNyc2VuYjAxAEAABwAAAcAA8RAAiUABQA==' | base64 -d > /fuzz-seeds/2.testcase && \
+#     echo 'AAxAXwAABgAIAAIAAQAaAC0sF2u/S1EXB0EBC/YA8RAAAgHyAEZTB+BgAAAAABAABQIB0BHRkeBvBOAAYAAAQwAGAADxEAAHAGRACAAA8RAAGbAQAIZAAUAAYAAGAEDyAEZT' | base64 -d > /fuzz-seeds/3.testcase && \
+#     echo 'AA1APgAABQAAAAIAEQAIAAIAAQAaABUUJxO0PzEYAgHaKAkIaW50ZXJuZXQAZEAIAADxEAAZsBAAQ0AGAADxEAAH' | base64 -d > /fuzz-seeds/4.testcase && \
+#     echo 'ABZAPwAAAwAAAAIAEQAIAAIAAQBKQCwrAUgBAm3YAAAYAA8wIIAAAQAKBACiAEJQAMAKoABACKSAABAAAIJQUABN' | base64 -d > /fuzz-seeds/5.testcase && \
+#     echo 'IAkAIgAAAwAAQAIAEQAIQAIAAQAzQA8AADJACgofwKh6EgAAAAE=' | base64 -d > /fuzz-seeds/6.testcase && \
+#     echo 'AA1ANwAABQAAAAIAEQAIAAIAAQAaAA4NJycCh40ZB0MAA1IAwgBkQAgAAPEQABmwEABDQAYAAPEQAAc=' | base64 -d > /fuzz-seeds/7.testcase && \
+#     echo 'ABJAFQAAAwAAAAIAEQAIAAIAAQACQAICgA==' | base64 -d > /fuzz-seeds/8.testcase && \
+#     echo 'IBcADwAAAgAAQAIAEQAIQAIAAQ==' | base64 -d > /fuzz-seeds/9.testcase && \
+#     echo 'AAxANwAABgAIAAIAAgAaAAUExxrKiQBDAAYAAPEQAAcAZEAIAADxEAAZsBAAhkABQABgAAYAQPIARlM=' | base64 -d > /fuzz-seeds/10.testcase && \
+#     echo 'ABZAPwAAAwAAAAIAEgAIAAIAAgBKQCwrAUgBAm3YAAAYAA8wIIAAAQAKBACiAEJQAMAKoABACKSAABAAAIJQUABNAA==' | base64 -d > /fuzz-seeds/11.testcase && \
+#     echo 'IAkAIgAAAwAAQAIAEgAIQAIAAgAzQA8AADJACgofwKh6EgAAAAI=' | base64 -d > /fuzz-seeds/12.testcase && \
+#     echo 'AA1APwAABQAAAAIAEgAIAAIAAgAaABYVFx9zcd8bB0UJC/YA8RAAAgHyAEZTAGRACAAA8RAAGbAQAENABgAA8RAABw==' | base64 -d > /fuzz-seeds/13.testcase && \
+#     echo 'IBcADwAAAgAAQAIAEgAIQAIAAg==' | base64 -d > /fuzz-seeds/14.testcase
+
+# COPY generated-s1a-seeds/ /fuzz-seeds/
+
+WORKDIR /srsran
+# RUN bash $SRSRAN_ROOT/fuzzing_configs.sh
